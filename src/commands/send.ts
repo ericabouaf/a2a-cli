@@ -30,6 +30,9 @@ export async function sendCommand(
 
   const params: MessageSendParams = {
     message: messagePayload,
+    configuration: {
+      blocking: wait,
+    },
   };
 
   try {

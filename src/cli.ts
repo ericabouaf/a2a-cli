@@ -102,9 +102,4 @@ program
     }
   });
 
-// Default to chat if no command specified (for backward compatibility)
-if (process.argv.length === 2 || (process.argv.length === 4 && process.argv[2] === '--server')) {
-  process.argv.push('chat');
-}
-
 program.parse();
