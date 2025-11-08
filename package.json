@@ -1,6 +1,6 @@
 {
   "name": "a2a-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A simple CLI client for A2A agents",
   "main": "dist/cli.js",
   "bin": {

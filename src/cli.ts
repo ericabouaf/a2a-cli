@@ -14,7 +14,7 @@ const program = new Command();
 program
   .name("a2a-cli")
   .description("A CLI client for A2A agents")
-  .version("1.0.0")
+  .version("1.0.1")
   .option("-s, --server <url>", "Agent server URL", "http://localhost:41241");
 
 // Send command
