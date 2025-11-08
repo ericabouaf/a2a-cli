@@ -13,10 +13,6 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ericabouaf/a2a-cli.git"
-  },
   "keywords": ["a2a", "cli", "agent"],
   "author": "Eric Abouaf <eric.abouaf@gmail.com>",
   "license": "ISC",
