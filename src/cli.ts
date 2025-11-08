@@ -1,320 +1,110 @@
 #!/usr/bin/env node
 
-import readline from "node:readline";
-import crypto from "node:crypto";
-import { A2AClient } from "@a2a-js/sdk/client";
-import {
-  MessageSendParams,
-  TaskStatusUpdateEvent,
-  TaskArtifactUpdateEvent,
-  Message,
-  Task,
-  FilePart,
-  DataPart,
-  AgentCard,
-  Part,
-} from "@a2a-js/sdk";
+import { Command } from "commander";
+import { initializeClient } from "./utils/client.js";
+import { colorize } from "./utils/display.js";
+import { chatCommand } from "./commands/chat.js";
+import { sendCommand } from "./commands/send.js";
+import { getCommand } from "./commands/get.js";
+import { cancelCommand } from "./commands/cancel.js";
+import * as fs from "node:fs";
 
-const colors = {
-  reset: "\x1b[0m",
-  bright: "\x1b[1m",
-  dim: "\x1b[2m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  magenta: "\x1b[35m",
-  cyan: "\x1b[36m",
-  gray: "\x1b[90m",
-};
+const program = new Command();
 
-function colorize(color: keyof typeof colors, text: string): string {
-  return `${colors[color]}${text}${colors.reset}`;
-}
+program
+  .name("a2a-cli")
+  .description("A CLI client for A2A agents")
+  .version("1.0.0")
+  .option("-s, --server <url>", "Agent server URL", "http://localhost:41241");
 
-function generateId(): string {
-  return crypto.randomUUID();
-}
+// Send command
+program
+  .command("send")
+  .description("Send a message to the agent")
+  .argument("[message]", "Message to send (or read from stdin if not provided)")
+  .option("-w, --wait", "Wait for task completion (streaming mode)", false)
+  .action(async (message, options) => {
+    const serverUrl = program.opts().server;
 
-let currentTaskId: string | undefined = undefined;
-let currentContextId: string | undefined = undefined;
-const serverUrl = process.argv[2] || "http://localhost:41241";
-let client: A2AClient;
-let agentName = "Agent";
+    let messageText: string;
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  prompt: colorize("cyan", "You: "),
-});
-
-function printAgentEvent(
-  event: TaskStatusUpdateEvent | TaskArtifactUpdateEvent
-) {
-  const timestamp = new Date().toLocaleTimeString();
-  const prefix = colorize("magenta", `\n${agentName} [${timestamp}]:`);
-
-  if (event.kind === "status-update") {
-    const update = event as TaskStatusUpdateEvent;
-    const state = update.status.state;
-    let stateEmoji = "❓";
-    let stateColor: keyof typeof colors = "yellow";
-
-    switch (state) {
-      case "working":
-        stateEmoji = "⏳";
-        stateColor = "blue";
-        break;
-      case "input-required":
-        stateEmoji = "🤔";
-        stateColor = "yellow";
-        break;
-      case "completed":
-        stateEmoji = "✅";
-        stateColor = "green";
-        break;
-      case "canceled":
-        stateEmoji = "⏹️";
-        stateColor = "gray";
-        break;
-      case "failed":
-        stateEmoji = "❌";
-        stateColor = "red";
-        break;
-      default:
-        stateEmoji = "ℹ️";
-        stateColor = "dim";
-        break;
-    }
-
-    console.log(
-      `${prefix} ${stateEmoji} Status: ${colorize(stateColor, state)} (Task: ${update.taskId}, Context: ${update.contextId}) ${update.final ? colorize("bright", "[FINAL]") : ""}`
-    );
-
-    if (update.status.message) {
-      printMessageContent(update.status.message);
-    }
-  } else if (event.kind === "artifact-update") {
-    const update = event as TaskArtifactUpdateEvent;
-    console.log(
-      `${prefix} 📄 Artifact Received: ${update.artifact.name || "(unnamed)"
-      } (ID: ${update.artifact.artifactId}, Task: ${update.taskId}, Context: ${update.contextId})`
-    );
-    printMessageContent({
-      messageId: generateId(),
-      kind: "message",
-      role: "agent",
-      parts: update.artifact.parts,
-      taskId: update.taskId,
-      contextId: update.contextId,
-    });
-  } else {
-    console.log(
-      prefix,
-      colorize("yellow", "Received unknown event type in printAgentEvent:"),
-      event
-    );
-  }
-}
-
-function printMessageContent(message: Message) {
-  message.parts.forEach((part: Part, index: number) => {
-    const partPrefix = colorize("gray", `  Part ${index + 1}/${message.parts.length}:`);
-    if (part.kind === "text") {
-      console.log(`${partPrefix} ${colorize("green", "📝 Text:")}`, part.text);
-    } else if (part.kind === "file") {
-      const filePart = part as FilePart;
-      console.log(
-        `${partPrefix} ${colorize("blue", "📄 File:")} Name: ${filePart.file.name || "N/A"
-        }, Type: ${filePart.file.mimeType || "N/A"}, Source: ${("bytes" in filePart.file) ? "Inline (bytes)" : filePart.file.uri
-        }`
-      );
-    } else if (part.kind === "data") {
-      const dataPart = part as DataPart;
-      console.log(
-        `${partPrefix} ${colorize("yellow", "📊 Data:")}`,
-        JSON.stringify(dataPart.data, null, 2)
-      );
+    if (message) {
+      messageText = message;
     } else {
-      console.log(`${partPrefix} ${colorize("yellow", "Unsupported part kind:")}`, part);
+      // Read from stdin
+      const stdin = fs.readFileSync(0, "utf-8");
+      messageText = stdin.trim();
+      if (!messageText) {
+        console.error(colorize("red", "✗ No message provided"));
+        process.exit(1);
+      }
     }
-  });
-}
-
-async function initializeClient() {
-  console.log(
-    colorize("dim", `Attempting to connect to agent at: ${serverUrl}`)
-  );
-  try {
-    client = await A2AClient.fromCardUrl(serverUrl);
-    const card: AgentCard = await client.getAgentCard();
-    agentName = card.name || "Agent";
-    console.log(colorize("green", `✓ Agent Card Found:`));
-    console.log(`  Name:        ${colorize("bright", agentName)}`);
-    if (card.description) {
-      console.log(`  Description: ${card.description}`);
-    }
-    console.log(`  Version:     ${card.version || "N/A"}`);
-    if (card.capabilities?.streaming) {
-      console.log(`  Streaming:   ${colorize("green", "Supported")}`);
-    } else {
-      console.log(`  Streaming:   ${colorize("yellow", "Not Supported (or not specified)")}`);
-    }
-  } catch (error: any) {
-    console.log(
-      colorize("yellow", `⚠️ Error connecting to agent or fetching card`)
-    );
-    throw error;
-  }
-}
-
-async function main() {
-  console.log(colorize("bright", `A2A Terminal Client`));
-  console.log(colorize("dim", `Agent Base URL: ${serverUrl}`));
-
-  await initializeClient();
-
-  console.log(colorize("dim", `No active task or context initially. Use '/new' to start a fresh session or send a message.`));
-  console.log(
-    colorize("green", `Enter messages, or use '/new' to start a new session. '/exit' to quit.`)
-  );
-
-  rl.setPrompt(colorize("cyan", `${agentName} > You: `));
-  rl.prompt();
-
-  rl.on("line", async (line) => {
-    const input = line.trim();
-    rl.setPrompt(colorize("cyan", `${agentName} > You: `));
-
-    if (!input) {
-      rl.prompt();
-      return;
-    }
-
-    if (input.toLowerCase() === "/new") {
-      currentTaskId = undefined;
-      currentContextId = undefined;
-      console.log(
-        colorize("bright", `✨ Starting new session. Task and Context IDs are cleared.`)
-      );
-      rl.prompt();
-      return;
-    }
-
-    if (input.toLowerCase() === "/exit") {
-      rl.close();
-      return;
-    }
-
-    const messageId = generateId();
-
-    const messagePayload: Message = {
-      messageId: messageId,
-      kind: "message",
-      role: "user",
-      parts: [
-        {
-          kind: "text",
-          text: input,
-        },
-      ],
-    };
-
-    if (currentTaskId) {
-      messagePayload.taskId = currentTaskId;
-    }
-    if (currentContextId) {
-      messagePayload.contextId = currentContextId;
-    }
-
-    const params: MessageSendParams = {
-      message: messagePayload,
-    };
 
     try {
-      console.log(colorize("dim", "Sending message..."));
-      const stream = client.sendMessageStream(params);
-
-      for await (const event of stream) {
-
-        //console.log("DEBUG event", event);
-
-        const timestamp = new Date().toLocaleTimeString();
-        const prefix = colorize("magenta", `\n${agentName} [${timestamp}]:`);
-
-        if (event.kind === "status-update" || event.kind === "artifact-update") {
-          const typedEvent = event as TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
-          printAgentEvent(typedEvent);
-
-          if (typedEvent.kind === "status-update" && (typedEvent as TaskStatusUpdateEvent).final && (typedEvent as TaskStatusUpdateEvent).status.state !== "input-required") {
-            console.log(colorize("yellow", `   Task ${typedEvent.taskId} is final. Clearing current task ID.`));
-            currentTaskId = undefined;
-          }
-
-        } else if (event.kind === "message") {
-          const msg = event as Message;
-          console.log(`${prefix} ${colorize("green", "✉️ Message Stream Event:")}`);
-          printMessageContent(msg);
-          if (msg.taskId && msg.taskId !== currentTaskId) {
-            console.log(colorize("dim", `   Task ID context updated to ${msg.taskId} based on message event.`));
-            currentTaskId = msg.taskId;
-          }
-          if (msg.contextId && msg.contextId !== currentContextId) {
-            console.log(colorize("dim", `   Context ID updated to ${msg.contextId} based on message event.`));
-            currentContextId = msg.contextId;
-          }
-        } else if (event.kind === "task") {
-          const task = event as Task;
-          console.log(`${prefix} ${colorize("blue", "ℹ️ Task Stream Event:")} ID: ${task.id}, Context: ${task.contextId}, Status: ${task.status.state}`);
-          if (task.id !== currentTaskId) {
-            console.log(colorize("dim", `   Task ID updated from ${currentTaskId || 'N/A'} to ${task.id}`));
-            currentTaskId = task.id;
-          }
-          if (task.contextId && task.contextId !== currentContextId) {
-            console.log(colorize("dim", `   Context ID updated from ${currentContextId || 'N/A'} to ${task.contextId}`));
-            currentContextId = task.contextId;
-          }
-          if (task.status.message) {
-            console.log(colorize("gray", "   Task includes message:"));
-            printMessageContent(task.status.message);
-          }
-          if (task.artifacts && task.artifacts.length > 0) {
-            console.log(colorize("gray", `   Task includes ${task.artifacts.length} artifact(s).`));
-          }
-        } else {
-          console.log(prefix, colorize("yellow", "Received unknown event structure from stream:"), event);
-        }
-      }
-      console.log(colorize("dim", `--- End of response stream for this input ---`));
+      const { client, agentName } = await initializeClient(serverUrl);
+      await sendCommand(client, agentName, messageText, options.wait);
     } catch (error: any) {
-      const timestamp = new Date().toLocaleTimeString();
-      const prefix = colorize("red", `\n${agentName} [${timestamp}] ERROR:`);
-      console.error(
-        prefix,
-        `Error communicating with agent:`,
-        error.message || error
-      );
-      if (error.code) {
-        console.error(colorize("gray", `   Code: ${error.code}`));
-      }
-      if (error.data) {
-        console.error(
-          colorize("gray", `   Data: ${JSON.stringify(error.data)}`)
-        );
-      }
-      if (!(error.code || error.data) && error.stack) {
-        console.error(colorize("gray", error.stack.split('\n').slice(1, 3).join('\n')));
-      }
-    } finally {
-      rl.prompt();
+      console.error(colorize("red", `✗ Failed to initialize client: ${error.message}`));
+      process.exit(1);
     }
-  }).on("close", () => {
-    console.log(colorize("yellow", "\nExiting A2A Terminal Client. Goodbye!"));
-    process.exit(0);
   });
+
+// Chat command
+program
+  .command("chat")
+  .description("Start an interactive chat session with the agent")
+  .action(async () => {
+    const serverUrl = program.opts().server;
+
+    console.log(colorize("bright", `A2A Terminal Client`));
+    console.log(colorize("dim", `Agent Base URL: ${serverUrl}`));
+
+    try {
+      const { client, agentName } = await initializeClient(serverUrl);
+      await chatCommand(client, agentName);
+    } catch (error: any) {
+      console.error(colorize("red", `✗ Failed to initialize client: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// Get command
+program
+  .command("get")
+  .description("Get details about a specific task")
+  .argument("<task-id>", "Task ID to retrieve")
+  .action(async (taskId) => {
+    const serverUrl = program.opts().server;
+
+    try {
+      const { client, agentName } = await initializeClient(serverUrl);
+      await getCommand(client, agentName, taskId);
+    } catch (error: any) {
+      console.error(colorize("red", `✗ Failed to initialize client: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// Cancel command
+program
+  .command("cancel")
+  .description("Cancel a running task")
+  .argument("<task-id>", "Task ID to cancel")
+  .action(async (taskId) => {
+    const serverUrl = program.opts().server;
+
+    try {
+      const { client, agentName } = await initializeClient(serverUrl);
+      await cancelCommand(client, agentName, taskId);
+    } catch (error: any) {
+      console.error(colorize("red", `✗ Failed to initialize client: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// Default to chat if no command specified (for backward compatibility)
+if (process.argv.length === 2 || (process.argv.length === 4 && process.argv[2] === '--server')) {
+  process.argv.push('chat');
 }
 
-main().catch(err => {
-  console.error(colorize("red", "Unhandled error in main:"), err);
-  process.exit(1);
-});
+program.parse();

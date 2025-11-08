@@ -9,7 +9,6 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
-    "dev-simple-message": "tsx src/simple-message.ts",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
@@ -18,7 +17,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@a2a-js/sdk": "^0.3.4"
+    "@a2a-js/sdk": "^0.3.4",
+    "commander": "^14.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",

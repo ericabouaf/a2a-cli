@@ -1,197 +1,170 @@
-# A2A CLI Client
+# a2a-cli
 
-A simple command-line interface (CLI) client for interacting with A2A (Agent-to-Agent) protocol compliant agents. This client provides an interactive terminal interface for sending messages to agents and receiving streaming responses with full support for tasks, contexts, and artifacts.
-
-## Features
-
-- 🚀 **Interactive Terminal Interface**: User-friendly command-line interface with colorized output
-- 📡 **Streaming Support**: Real-time streaming of agent responses
-- 📝 **Task Management**: Automatic tracking of task IDs and context IDs across conversations
-- 🎨 **Rich Output**: Color-coded status indicators and formatted message display
-- 📄 **Artifact Support**: Display of artifacts returned by agents
-- 🔄 **Session Management**: Easy session reset with `/new` command
+A command-line interface for interacting with A2A (Agent-to-Agent) protocol compliant agents. Send messages, manage tasks, and chat interactively with agents from your terminal.
 
 ## Installation
 
-### Prerequisites
-
-- Node.js 18 or higher
-- npm or yarn
-
-### Install from source
-
 ```bash
-# Clone the repository
-git clone <your-repo-url>
-cd a2a-cli
-
-# Install dependencies
-npm install
-
-# Build the project
-npm run build
+npm install -g a2a-cli
 ```
 
-## Usage
-
-### Running the CLI
-
-You can run the CLI in development mode or use the built version:
-
-#### Development mode (with TypeScript)
-```bash
-npm run dev <agent-url>
-```
-
-#### Production mode (compiled JavaScript)
-```bash
-npm start <agent-url>
-```
-
-#### Direct execution
-```bash
-node dist/cli.js <agent-url>
-```
-
-### Example
+## Quick Start
 
 ```bash
-# Connect to a local agent
-npm run dev http://localhost:8080
+# Start an interactive chat session
+a2a-cli chat
 
-# Connect to a remote agent
-npm run dev https://api.example.com/agent
+# Send a one-off message
+a2a-cli send "Hello, agent"
+
+# Send with custom server
+a2a-cli --server http://localhost:8000 send "What is the weather?"
 ```
 
-### Commands
+## Commands
 
-Once connected, you can interact with the agent using the following commands:
+### `chat` - Interactive Chat Session
 
-- **Send a message**: Simply type your message and press Enter
-- **`/new`**: Start a new session (clears task and context IDs)
-- **`/exit`**: Exit the CLI
+Start an interactive conversation with the agent:
 
-### Interactive Session Example
+```bash
+a2a-cli chat
+a2a-cli --server http://localhost:8000 chat
+```
 
+**In-chat commands:**
+- `/new` - Start a fresh session (clears task and context IDs)
+- `/exit` - Exit the chat session
+
+**Example session:**
 ```
 A2A Terminal Client
-Agent Base URL: http://localhost:8080
-Attempting to connect to agent at: http://localhost:8080
+Agent Base URL: http://localhost:41241
 ✓ Agent Card Found:
   Name:        Example Agent
-  Description: An example A2A agent
-  Version:     1.0.0
   Streaming:   Supported
-
-Enter messages, or use '/new' to start a new session. '/exit' to quit.
 
 Example Agent > You: Hello, can you help me?
 
-Example Agent [10:23:45]: ⏳ Status: working (Task: task-123, Context: ctx-456)
-Example Agent [10:23:45]: ✉️ Message Stream Event:
-  Part 1: 📝 Text: Hello! I'd be happy to help you. What would you like assistance with?
-
-Example Agent > You: /new
-✨ Starting new session. Task and Context IDs are cleared.
+Example Agent [10:23:45]: ⏳ Status: working
+Example Agent [10:23:45]: ✉️ Message:
+  📝 Text: Hello! I'd be happy to help you.
 
 Example Agent > You: /exit
 Exiting A2A Terminal Client. Goodbye!
 ```
 
+### `send` - Send a Message
+
+Send a one-off message to the agent:
+
+```bash
+# Send a message directly
+a2a-cli send "Hello, agent"
+
+# Wait for task completion (streaming mode)
+a2a-cli send "Generate a list of 5 movie recommendations" --wait
+
+# Send from stdin
+a2a-cli send < prompt-file.txt
+cat prompt-file.txt | a2a-cli send
+
+# With custom server
+a2a-cli --server http://localhost:8000 send "What's the time?"
+```
+
+**Options:**
+- `-w, --wait` - Wait for task completion using streaming mode (default: false)
+
+### `get` - Get Task Details
+
+Retrieve details about a specific task:
+
+```bash
+a2a-cli get <task-id>
+```
+
+**Output includes:**
+- Task ID and Context ID
+- Current status
+- Status messages
+- Artifacts (if any)
+
+### `cancel` - Cancel a Task
+
+Cancel a running task:
+
+```bash
+a2a-cli cancel <task-id>
+```
+
+## Global Options
+
+- `-s, --server <url>` - Agent server URL (default: `http://localhost:41241`)
+- `-V, --version` - Output the version number
+- `-h, --help` - Display help information
+
+## Usage Examples
+
+```bash
+# Interactive chat with default server
+a2a-cli chat
+
+# Interactive chat with custom server
+a2a-cli --server http://localhost:8000 chat
+
+# Send a quick message (fire and forget)
+a2a-cli send "What is 2+2?"
+
+# Send and wait for completion
+a2a-cli send "Write me a poem" --wait
+
+# Send from a file
+a2a-cli send < my-prompt.txt
+
+# Get task information
+a2a-cli get task-abc-123
+
+# Cancel a long-running task
+a2a-cli cancel task-abc-123
+
+# Chain commands
+a2a-cli --server http://localhost:8000 send "Generate code" --wait > output.txt
+```
+
+## Features
+
+- 🚀 **Multiple command modes**: Interactive chat or one-off messages
+- 📡 **Streaming support**: Real-time agent responses with `--wait` flag
+- 📝 **Task management**: Query and cancel tasks
+- 🎨 **Rich output**: Color-coded status indicators and formatted messages
+- 📄 **Artifact support**: Display files and data returned by agents
+- 🔄 **Context persistence**: Maintains conversation context in chat mode
+- 📥 **Stdin support**: Pipe prompts from files or other commands
+
 ## Development
 
-### Project Structure
+```bash
+# Run in development mode
+npm run dev chat
+npm run dev send "test message"
 
+# Type checking
+npm run typecheck
+
+# Build
+npm run build
 ```
-a2a-cli/
-├── src/
-│   └── cli.ts          # Main CLI implementation
-├── dist/               # Compiled JavaScript output
-├── package.json        # Project configuration
-├── tsconfig.json       # TypeScript configuration
-└── README.md          # This file
-```
 
-### Available Scripts
+## Color Coding
 
-- `npm run build` - Build the TypeScript project
-- `npm run dev` - Run in development mode with tsx
-- `npm start` - Run the built version
-- `npm run typecheck` - Check TypeScript types without building
-
-### TypeScript Configuration
-
-The project uses TypeScript with the following key configurations:
-- Target: ES2022
-- Module: CommonJS
-- Strict mode enabled
-- Source maps for debugging
-
-## Features in Detail
-
-### Streaming Response Handling
-
-The CLI handles various event types from the A2A protocol:
-
-- **Status Updates**: Task state changes (working, completed, failed, etc.)
-- **Messages**: Text responses from the agent
-- **Artifacts**: Files or data returned by the agent
-- **Task Events**: Task lifecycle events
-
-### Color Coding
-
-The CLI uses color coding for better readability:
-
-- 🟦 Blue: Working/In-progress states
-- 🟩 Green: Completed/Success states
-- 🟨 Yellow: Warnings/Input required
-- 🔴 Red: Errors/Failed states
-- ⚪ Gray: Metadata and debug information
-
-### Context Persistence
-
-The CLI automatically maintains:
-- Current task ID across messages
-- Current context ID for conversation continuity
-- Session state that can be reset with `/new`
-
-## API Reference
-
-The CLI uses the `@a2a-js/sdk` library to communicate with A2A agents. Key types used:
-
-- `A2AClient`: Main client for agent communication
-- `Message`: Message structure with parts (text, files, data)
-- `Task`: Task information with status and artifacts
-- `AgentCard`: Agent metadata and capabilities
-
-## Error Handling
-
-The CLI provides graceful error handling for:
-- Connection failures
-- Invalid agent responses
-- Network timeouts
-- Protocol errors
-
-Errors are displayed with helpful messages and stack traces in debug mode.
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+The CLI uses colors for better readability:
+- 🟦 **Blue**: Working/In-progress states
+- 🟩 **Green**: Completed/Success states
+- 🟨 **Yellow**: Warnings/Input required
+- 🔴 **Red**: Errors/Failed states
+- ⚪ **Gray**: Metadata and timestamps
 
 ## License
 
 ISC
-
-## Acknowledgments
-
-Built using the [A2A JavaScript SDK](https://github.com/a2aproject/a2a-js) and inspired by the [A2A samples repository](https://github.com/a2aproject/a2a-samples).
-
-## Support
-
-For issues, questions, or suggestions, please open an issue in the repository.
