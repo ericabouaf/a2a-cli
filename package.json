@@ -13,8 +13,12 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ericabouaf/a2a-cli.git"
+  },
   "keywords": ["a2a", "cli", "agent"],
-  "author": "",
+  "author": "Eric Abouaf <eric.abouaf@gmail.com>",
   "license": "ISC",
   "dependencies": {
     "@a2a-js/sdk": "^0.3.4",
