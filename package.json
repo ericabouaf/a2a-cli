@@ -1,0 +1,28 @@
+{
+  "name": "a2a-cli",
+  "version": "1.0.0",
+  "description": "A simple CLI client for A2A agents",
+  "main": "dist/cli.js",
+  "bin": {
+    "a2a-cli": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "dev-simple-message": "tsx src/simple-message.ts",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["a2a", "cli", "agent"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@a2a-js/sdk": "^0.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
