@@ -92,9 +92,14 @@ When the agent needs you — a question, or a tool permission — the task moves
 
 ```
 ❓ Which colour do you prefer?
-     • red — The colour red
-     • blue — The colour blue
+   - red — The colour red
+   - blue — The colour blue
+   reply with your answer (free text works)
 ```
+
+The question comes from the status message's text part, the options from its
+`data` part; a tool permission is shown the same way, with the tool, its input
+and the reason it was asked.
 
 In `chat`, just type your answer on the next line. Outside of it, reply on the
 same task:
@@ -102,6 +107,23 @@ same task:
 ```bash
 a2a-cli send "blue" --task <task-id> --context <context-id>
 ```
+
+## Reading the stream
+
+The CLI switches on the `metadata.kind` an A2A agent may put on its status
+messages:
+
+| `metadata.kind` | Rendered as |
+|---|---|
+| `tool_use` | a dimmed `⚙ Write` line — progress, not the answer |
+| `result` | the agent's line: `agent: …` |
+| `ask_user_question` / `permission_request` | the `❓` block above |
+| `resumed` | nothing: the resume is announced by the task line |
+| *(absent)* | the agent's line, as before |
+
+A `task` event whose id is the task you are currently answering is a **resume
+snapshot**, printed as `↩ resuming task <id>` instead of a state line. Agents
+that send no metadata still render exactly as they used to.
 
 ## Global options
 

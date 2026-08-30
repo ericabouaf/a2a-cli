@@ -18,29 +18,43 @@ export interface StreamOutcome {
   inputRequired: boolean;
 }
 
+export interface RenderOptions {
+  /**
+   * The task this turn is answering, when the client is replying to a task
+   * parked in `input-required`. A `task` event carrying this id is the agent's
+   * resume snapshot, not a new task.
+   */
+  answeringTaskId?: string;
+}
+
 /**
- * Renders the `ask_user_question` / `permission_request` data part, if any.
- * `questionText` is the human-readable rendering the agent already sent: when
- * it spells out the options itself, we do not repeat them.
+ * Renders the `ask_user_question` / `permission_request` data part.
+ *
+ * The agent's text part is the bare prompt: options, tool input and the rest
+ * live in the data part alone, so everything below is printed unconditionally
+ * — nothing can be a duplicate of the question text.
  */
-function printPrompt(datas: any[], questionText: string) {
+function printPrompt(datas: any[]) {
   for (const data of datas) {
     if (data?.kind === "ask_user_question") {
       for (const question of data.questions ?? []) {
-        const options: any[] = question?.options ?? [];
-        if (options.length === 0) continue;
-        const labels = options.map((o) => o?.label ?? String(o));
-        if (labels.every((label: string) => questionText.includes(label))) continue;
-        for (const option of options) {
+        for (const option of question?.options ?? []) {
           const label = option?.label ?? String(option);
           const description = option?.description ? ` — ${option.description}` : "";
-          console.log(colorize("gray", `     • ${label}${description}`));
+          console.log(colorize("gray", `   - ${label}${description}`));
+        }
+        if (question?.multiSelect) {
+          console.log(colorize("gray", `   (several answers allowed)`));
         }
       }
+      console.log(colorize("gray", `   reply with your answer (free text works)`));
     } else if (data?.kind === "permission_request") {
-      console.log(colorize("gray", `     tool: ${data.toolName ?? "?"}`));
-      console.log(colorize("gray", `     input: ${JSON.stringify(data.input ?? {})}`));
-      console.log(colorize("gray", `     answer 'yes' to allow, anything else denies`));
+      console.log(colorize("gray", `   tool: ${data.toolName ?? "?"}`));
+      console.log(colorize("gray", `   input: ${JSON.stringify(data.input ?? {})}`));
+      if (data.decisionReason) {
+        console.log(colorize("gray", `   why: ${data.decisionReason}`));
+      }
+      console.log(colorize("gray", `   reply 'yes' to allow, anything else denies`));
     }
   }
 }
@@ -48,10 +62,16 @@ function printPrompt(datas: any[], questionText: string) {
 /**
  * Drains a v1.0 stream and prints it. The stream ends on a terminal state and
  * on `input-required` alike.
+ *
+ * Status messages are dispatched on their `metadata.kind` (the server's event
+ * stream contract): `tool_use` is progress noise, `result` is the agent's
+ * answer, `resumed` says a parked task is running again. An unmarked message
+ * is printed as the agent's line, as before.
  */
 export async function renderStream(
   stream: AsyncGenerator<StreamResponse, void, undefined>,
-  agentName: string
+  agentName: string,
+  options: RenderOptions = {}
 ): Promise<StreamOutcome> {
   const outcome: StreamOutcome = { inputRequired: false };
   const agentPrefix = colorize("magenta", `${agentName}:`);
@@ -65,9 +85,16 @@ export async function renderStream(
         const task = payload.value;
         outcome.taskId = task.id || outcome.taskId;
         outcome.contextId = task.contextId || outcome.contextId;
-        console.log(
-          colorize("gray", `  task ${task.id} · ${stateName(task.status?.state)}`)
-        );
+        if (options.answeringTaskId && task.id === options.answeringTaskId) {
+          // The agent republished the task we are answering: a resume, not a
+          // new task. Its state is the parked one (INPUT_REQUIRED), which
+          // would read as a stale question if printed as a state line.
+          console.log(colorize("gray", `  ↩ resuming task ${task.id}`));
+        } else {
+          console.log(
+            colorize("gray", `  task ${task.id} · ${stateName(task.status?.state)}`)
+          );
+        }
         break;
       }
 
@@ -78,13 +105,21 @@ export async function renderStream(
         const state = update.status?.state;
         outcome.lastState = state;
 
-        const texts = textParts(update.status?.message?.parts);
-        const datas = dataParts(update.status?.message?.parts);
+        const message = update.status?.message;
+        const kind = (message?.metadata as { kind?: string } | undefined)?.kind;
+        const texts = textParts(message?.parts);
+        const datas = dataParts(message?.parts);
 
         if (state === TaskState.TASK_STATE_INPUT_REQUIRED) {
           const question = texts.join("\n").trim() || "The agent needs your input.";
           console.log(colorize("yellow", `❓ ${question}`));
-          printPrompt(datas, question);
+          printPrompt(datas);
+        } else if (kind === "tool_use") {
+          const toolName = (message?.metadata as { toolName?: string } | undefined)?.toolName;
+          const label = toolName || texts.join(" ").trim() || "tool";
+          console.log(colorize("dim", `⚙ ${label}`));
+        } else if (kind === "resumed") {
+          // Already announced by the `↩ resuming task` line above.
         } else {
           for (const text of texts) console.log(`${agentPrefix} ${text}`);
           if (isTerminal(state)) console.log(formatState(state));

@@ -41,7 +41,8 @@ export async function sendCommand(
         configuration: undefined,
         metadata: undefined,
       }),
-      agentName
+      agentName,
+      { answeringTaskId: options.task }
     );
 
     if (outcome.taskId) console.log(colorize("gray", `  task ${outcome.taskId}`));

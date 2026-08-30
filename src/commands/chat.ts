@@ -61,7 +61,10 @@ export async function chatCommand(client: Client, agentName: string) {
           configuration: undefined,
           metadata: undefined,
         }),
-        agentName
+        agentName,
+        // Non-empty only while answering a parked task: lets the renderer show
+        // the agent's task snapshot as a resume instead of a new task.
+        { answeringTaskId: taskId || undefined }
       );
 
       contextId = outcome.contextId ?? contextId;
