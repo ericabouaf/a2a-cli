@@ -1,120 +1,90 @@
-import { A2AClient } from "@a2a-js/sdk/client";
+import type { Client } from "@a2a-js/sdk/client";
+import { Task, TaskState } from "@a2a-js/sdk";
 import {
-  MessageSendParams,
-  TaskStatusUpdateEvent,
-  TaskArtifactUpdateEvent,
-  Message,
-  Task,
-} from "@a2a-js/sdk";
-import { colorize, printAgentEvent, printMessageContent, generateId } from "../utils/display.js";
+  buildUserMessage,
+  colorize,
+  formatState,
+  printParts,
+} from "../utils/display.js";
+import { renderStream } from "../utils/stream.js";
 
+export interface SendOptions {
+  wait?: boolean;
+  /** Continue an existing conversation. */
+  context?: string;
+  /** Answer a task parked in `input-required`. */
+  task?: string;
+}
+
+/** `sendMessage` returns `Message | Task`; v1.0 dropped the `kind` tag. */
+function isTask(result: unknown): result is Task {
+  return typeof result === "object" && result !== null && "id" in result && "status" in result;
+}
+
+/** Returns the process exit code. */
 export async function sendCommand(
-  client: A2AClient,
+  client: Client,
   agentName: string,
   messageText: string,
-  wait: boolean = false
-) {
-  const messageId = generateId();
+  options: SendOptions = {}
+): Promise<number> {
+  const message = buildUserMessage(messageText, {
+    taskId: options.task,
+    contextId: options.context,
+  });
 
-  const messagePayload: Message = {
-    messageId: messageId,
-    kind: "message",
-    role: "user",
-    parts: [
-      {
-        kind: "text",
-        text: messageText,
-      },
-    ],
-  };
-
-  const params: MessageSendParams = {
-    message: messagePayload,
-    configuration: {
-      blocking: wait,
-    },
-  };
-
-  try {
-    console.log(colorize("dim", "Sending message..."));
-
-    if (wait) {
-      // Use streaming API and wait for completion
-      const stream = client.sendMessageStream(params);
-
-      for await (const event of stream) {
-        const timestamp = new Date().toLocaleTimeString();
-        const prefix = colorize("magenta", `\n${agentName} [${timestamp}]:`);
-
-        if (event.kind === "status-update" || event.kind === "artifact-update") {
-          const typedEvent = event as TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
-          printAgentEvent(typedEvent, agentName);
-        } else if (event.kind === "message") {
-          const msg = event as Message;
-          console.log(`${prefix} ${colorize("green", "✉️ Message:")}`);
-          printMessageContent(msg);
-        } else if (event.kind === "task") {
-          const task = event as Task;
-          console.log(`${prefix} ${colorize("blue", "ℹ️ Task:")} ID: ${task.id}, Context: ${task.contextId}, Status: ${task.status.state}`);
-          if (task.status.message) {
-            console.log(colorize("gray", "   Task includes message:"));
-            printMessageContent(task.status.message);
-          }
-          if (task.artifacts && task.artifacts.length > 0) {
-            console.log(colorize("gray", `   Task includes ${task.artifacts.length} artifact(s).`));
-          }
-        } else {
-          console.log(prefix, colorize("yellow", "Received unknown event structure from stream:"), event);
-        }
-      }
-      console.log(colorize("green", `\n✓ Message sent and completed`));
-    } else {
-      // Fire and forget - just send the message
-      const response = await client.sendMessage(params);
-
-      if (client.isErrorResponse(response)) {
-        throw new Error(`RPC Error: ${response.error.message} (code: ${response.error.code})`);
-      }
-
-      const result = response.result;
-      console.log(colorize("green", `✓ Message sent successfully`));
-
-      if (result.kind === "task") {
-        const task = result as Task;
-        console.log(colorize("dim", `   Task ID: ${task.id}`));
-        console.log(colorize("dim", `   Context ID: ${task.contextId || "N/A"}`));
-        console.log(colorize("dim", `   Status: ${task.status.state}`));
-
-        if (task.status.message) {
-          console.log(colorize("gray", "\n   Initial response:"));
-          printMessageContent(task.status.message);
-        }
-      } else if (result.kind === "message") {
-        const message = result as Message;
-        console.log(colorize("dim", `   Message ID: ${message.messageId}`));
-        if (message.taskId) {
-          console.log(colorize("dim", `   Task ID: ${message.taskId}`));
-        }
-        if (message.contextId) {
-          console.log(colorize("dim", `   Context ID: ${message.contextId}`));
-        }
-        console.log(colorize("gray", "\n   Response:"));
-        printMessageContent(message);
-      }
-    }
-  } catch (error: any) {
-    console.error(
-      colorize("red", `✗ Error sending message:`),
-      error.message || error
+  if (options.wait) {
+    const outcome = await renderStream(
+      client.sendMessageStream({
+        tenant: "",
+        message,
+        configuration: undefined,
+        metadata: undefined,
+      }),
+      agentName
     );
-    if (error.code) {
-      console.error(colorize("gray", `   Code: ${error.code}`));
-    }
-    if (error.data) {
-      console.error(
-        colorize("gray", `   Data: ${JSON.stringify(error.data)}`)
+
+    if (outcome.taskId) console.log(colorize("gray", `  task ${outcome.taskId}`));
+    if (outcome.contextId) console.log(colorize("gray", `  context ${outcome.contextId}`));
+    if (outcome.inputRequired) {
+      console.log(
+        colorize(
+          "gray",
+          `  answer with: a2a-cli send "<answer>" --task ${outcome.taskId} --context ${outcome.contextId}`
+        )
       );
     }
-    process.exit(1);
+    return outcome.lastState === TaskState.TASK_STATE_FAILED ? 1 : 0;
   }
+
+  // Fire and forget: ask the server to return as soon as the task exists.
+  const result = await client.sendMessage({
+    tenant: "",
+    message,
+    configuration: {
+      acceptedOutputModes: [],
+      taskPushNotificationConfig: undefined,
+      returnImmediately: true,
+    },
+    metadata: undefined,
+  });
+
+  if (isTask(result)) {
+    console.log(colorize("green", "✓ Message sent"));
+    console.log(`  Task ID:    ${colorize("bright", result.id)}`);
+    console.log(`  Context ID: ${result.contextId || "(none)"}`);
+    console.log(`  State:      ${formatState(result.status?.state)}`);
+    if (result.status?.message?.parts?.length) {
+      console.log(colorize("gray", "  Status message:"));
+      printParts(result.status.message.parts, "    ");
+    }
+    return 0;
+  }
+
+  console.log(colorize("green", "✓ Message sent"));
+  console.log(`  Message ID: ${colorize("bright", result.messageId)}`);
+  if (result.taskId) console.log(`  Task ID:    ${result.taskId}`);
+  if (result.contextId) console.log(`  Context ID: ${result.contextId}`);
+  printParts(result.parts, "  ");
+  return 0;
 }
