@@ -1,11 +1,4 @@
-import {
-  Message,
-  Part,
-  FilePart,
-  DataPart,
-  TaskStatusUpdateEvent,
-  TaskArtifactUpdateEvent,
-} from "@a2a-js/sdk";
+import { Artifact, Message, Part, Role, Task, TaskState } from "@a2a-js/sdk";
 import crypto from "node:crypto";
 
 export const colors = {
@@ -29,96 +22,165 @@ export function generateId(): string {
   return crypto.randomUUID();
 }
 
-export function printMessageContent(message: Message) {
-  message.parts.forEach((part: Part, index: number) => {
-    const partPrefix = colorize("gray", `  Part ${index + 1}/${message.parts.length}:`);
-    if (part.kind === "text") {
-      console.log(`${partPrefix} ${colorize("green", "📝 Text:")}`, part.text);
-    } else if (part.kind === "file") {
-      const filePart = part as FilePart;
-      console.log(
-        `${partPrefix} ${colorize("blue", "📄 File:")} Name: ${filePart.file.name || "N/A"
-        }, Type: ${filePart.file.mimeType || "N/A"}, Source: ${("bytes" in filePart.file) ? "Inline (bytes)" : filePart.file.uri
-        }`
-      );
-    } else if (part.kind === "data") {
-      const dataPart = part as DataPart;
-      console.log(
-        `${partPrefix} ${colorize("yellow", "📊 Data:")}`,
-        JSON.stringify(dataPart.data, null, 2)
-      );
-    } else {
-      console.log(`${partPrefix} ${colorize("yellow", "Unsupported part kind:")}`, part);
-    }
-  });
+/**
+ * A2A v1.0 states are a numeric enum on the wire. Never show the number:
+ * `3` -> `COMPLETED`.
+ */
+export function stateName(state: TaskState | undefined): string {
+  if (state === undefined) return "UNKNOWN";
+  const raw = TaskState[state];
+  return typeof raw === "string" ? raw.replace(/^TASK_STATE_/, "") : `UNKNOWN(${state})`;
 }
 
-export function printAgentEvent(
-  event: TaskStatusUpdateEvent | TaskArtifactUpdateEvent,
-  agentName: string = "Agent"
-) {
-  const timestamp = new Date().toLocaleTimeString();
-  const prefix = colorize("magenta", `\n${agentName} [${timestamp}]:`);
+const STATE_ICONS: Partial<Record<TaskState, string>> = {
+  [TaskState.TASK_STATE_SUBMITTED]: "📥",
+  [TaskState.TASK_STATE_WORKING]: "⏳",
+  [TaskState.TASK_STATE_COMPLETED]: "✅",
+  [TaskState.TASK_STATE_FAILED]: "❌",
+  [TaskState.TASK_STATE_CANCELED]: "⏹️",
+  [TaskState.TASK_STATE_INPUT_REQUIRED]: "❓",
+  [TaskState.TASK_STATE_REJECTED]: "🚫",
+  [TaskState.TASK_STATE_AUTH_REQUIRED]: "🔒",
+};
 
-  if (event.kind === "status-update") {
-    const update = event as TaskStatusUpdateEvent;
-    const state = update.status.state;
-    let stateEmoji = "❓";
-    let stateColor: keyof typeof colors = "yellow";
+const STATE_COLORS: Partial<Record<TaskState, keyof typeof colors>> = {
+  [TaskState.TASK_STATE_SUBMITTED]: "gray",
+  [TaskState.TASK_STATE_WORKING]: "blue",
+  [TaskState.TASK_STATE_COMPLETED]: "green",
+  [TaskState.TASK_STATE_FAILED]: "red",
+  [TaskState.TASK_STATE_CANCELED]: "gray",
+  [TaskState.TASK_STATE_INPUT_REQUIRED]: "yellow",
+  [TaskState.TASK_STATE_REJECTED]: "red",
+  [TaskState.TASK_STATE_AUTH_REQUIRED]: "yellow",
+};
 
-    switch (state) {
-      case "working":
-        stateEmoji = "⏳";
-        stateColor = "blue";
+export function stateIcon(state: TaskState | undefined): string {
+  return (state !== undefined && STATE_ICONS[state]) || "ℹ️";
+}
+
+export function stateColor(state: TaskState | undefined): keyof typeof colors {
+  return (state !== undefined && STATE_COLORS[state]) || "dim";
+}
+
+/** States after which the agent will not send anything else for this task. */
+const TERMINAL_STATES: ReadonlySet<TaskState> = new Set([
+  TaskState.TASK_STATE_COMPLETED,
+  TaskState.TASK_STATE_FAILED,
+  TaskState.TASK_STATE_CANCELED,
+  TaskState.TASK_STATE_REJECTED,
+]);
+
+export function isTerminal(state: TaskState | undefined): boolean {
+  return state !== undefined && TERMINAL_STATES.has(state);
+}
+
+export function formatState(state: TaskState | undefined): string {
+  return `${stateIcon(state)} ${colorize(stateColor(state), stateName(state))}`;
+}
+
+/** The `text` values carried by a v1.0 part list. */
+export function textParts(parts: Part[] | undefined): string[] {
+  return (parts ?? [])
+    .filter((p) => p.content?.$case === "text")
+    .map((p) => (p.content as { $case: "text"; value: string }).value);
+}
+
+/** The `data` values carried by a v1.0 part list. */
+export function dataParts(parts: Part[] | undefined): any[] {
+  return (parts ?? [])
+    .filter((p) => p.content?.$case === "data")
+    .map((p) => (p.content as { $case: "data"; value: any }).value);
+}
+
+/** Builds a v1.0 user message. Empty string means "unset" for the id fields. */
+export function buildUserMessage(
+  text: string,
+  ids: { taskId?: string; contextId?: string } = {}
+): Message {
+  return {
+    messageId: generateId(),
+    contextId: ids.contextId ?? "",
+    taskId: ids.taskId ?? "",
+    role: Role.ROLE_USER,
+    parts: [
+      {
+        content: { $case: "text", value: text },
+        metadata: undefined,
+        filename: "",
+        mediaType: "text/plain",
+      },
+    ],
+    metadata: undefined,
+    extensions: [],
+    referenceTaskIds: [],
+  };
+}
+
+export function preview(text: string, max = 200): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+export function printParts(parts: Part[] | undefined, indent = "  ") {
+  for (const part of parts ?? []) {
+    switch (part.content?.$case) {
+      case "text":
+        console.log(`${indent}${part.content.value}`);
         break;
-      case "input-required":
-        stateEmoji = "🤔";
-        stateColor = "yellow";
+      case "data":
+        console.log(
+          `${indent}${colorize("yellow", "📊 data:")} ${JSON.stringify(part.content.value)}`
+        );
         break;
-      case "completed":
-        stateEmoji = "✅";
-        stateColor = "green";
+      case "url":
+        console.log(
+          `${indent}${colorize("blue", "🔗 file:")} ${part.filename || "(unnamed)"} ${part.content.value}`
+        );
         break;
-      case "canceled":
-        stateEmoji = "⏹️";
-        stateColor = "gray";
-        break;
-      case "failed":
-        stateEmoji = "❌";
-        stateColor = "red";
+      case "raw":
+        console.log(
+          `${indent}${colorize("blue", "📄 file:")} ${part.filename || "(unnamed)"} (${part.mediaType || "?"}, inline bytes)`
+        );
         break;
       default:
-        stateEmoji = "ℹ️";
-        stateColor = "dim";
-        break;
+        console.log(`${indent}${colorize("gray", "(empty part)")}`);
     }
-
-    console.log(
-      `${prefix} ${stateEmoji} Status: ${colorize(stateColor, state)} (Task: ${update.taskId}, Context: ${update.contextId}) ${update.final ? colorize("bright", "[FINAL]") : ""}`
-    );
-
-    if (update.status.message) {
-      printMessageContent(update.status.message);
-    }
-  } else if (event.kind === "artifact-update") {
-    const update = event as TaskArtifactUpdateEvent;
-    console.log(
-      `${prefix} 📄 Artifact Received: ${update.artifact.name || "(unnamed)"
-      } (ID: ${update.artifact.artifactId}, Task: ${update.taskId}, Context: ${update.contextId})`
-    );
-    printMessageContent({
-      messageId: generateId(),
-      kind: "message",
-      role: "agent",
-      parts: update.artifact.parts,
-      taskId: update.taskId,
-      contextId: update.contextId,
-    });
-  } else {
-    console.log(
-      prefix,
-      colorize("yellow", "Received unknown event type in printAgentEvent:"),
-      event
-    );
   }
+}
+
+export function printArtifact(artifact: Artifact | undefined, indent = "  ") {
+  if (!artifact) return;
+  const name = artifact.name || "(unnamed)";
+  console.log(`${indent}${colorize("blue", "📄 artifact:")} ${name} ${colorize("gray", `(${artifact.artifactId})`)}`);
+  const texts = textParts(artifact.parts);
+  if (texts.length > 0) {
+    console.log(`${indent}  ${colorize("gray", preview(texts.join(" ")))}`);
+  }
+}
+
+export function printTaskDetails(task: Task) {
+  console.log(`  Task ID:    ${colorize("bright", task.id)}`);
+  console.log(`  Context ID: ${task.contextId || "(none)"}`);
+  console.log(`  State:      ${formatState(task.status?.state)}`);
+
+  const texts = textParts(task.status?.message?.parts);
+  const datas = dataParts(task.status?.message?.parts);
+  if (texts.length > 0 || datas.length > 0) {
+    console.log(`\n  ${colorize("green", "Status message:")}`);
+    printParts(task.status?.message?.parts, "    ");
+  }
+
+  if (task.artifacts?.length) {
+    console.log(`\n  ${colorize("blue", `Artifacts (${task.artifacts.length}):`)}`);
+    for (const artifact of task.artifacts) printArtifact(artifact, "    ");
+  }
+}
+
+/**
+ * Exits once stdout has drained. The SDK's keep-alive HTTP sockets can hold
+ * the event loop open long after the last response, so we cannot just return.
+ */
+export function finish(code = 0): void {
+  process.exitCode = code;
+  process.stdout.write("", () => process.exit(code));
 }

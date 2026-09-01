@@ -1,6 +1,12 @@
 # a2a-cli
 
-A command-line interface for interacting with A2A (Agent-to-Agent) protocol compliant agents. Send messages, manage tasks, and chat interactively with agents from your terminal.
+A command-line client for agents speaking the [A2A](https://a2a-protocol.org/)
+protocol **v1.0** (`@a2a-js/sdk` 1.x). Send messages, follow streaming tasks,
+answer questions the agent asks back, and manage tasks from your terminal.
+
+> **v2 is a breaking change.** `--server` now takes the agent's **base URL**
+> (not the agent card URL) and the client speaks A2A v1.0 only. For v0.3
+> agents, stay on `a2a-cli@1`.
 
 ## Installation
 
@@ -8,162 +14,129 @@ A command-line interface for interacting with A2A (Agent-to-Agent) protocol comp
 npm install -g a2a-cli
 ```
 
-## Quick Start
+Requires Node.js >= 20.
+
+## Quick start
 
 ```bash
-# Start an interactive chat session
+# Default server is http://localhost:3008
 a2a-cli chat
 
-# Send a one-off message
-a2a-cli send "Hello, agent"
+# One-off message, streamed until the task finishes
+a2a-cli send "Reply with exactly: pong" --wait
 
-# Send with custom server
-a2a-cli --server http://localhost:8000 send "What is the weather?"
+# Another agent
+a2a-cli --server https://agent.example.com send "What is the weather?"
 ```
+
+`--server` is a base URL: the agent card is fetched at
+`<url>/.well-known/agent-card.json`. Passing the full card URL also works — the
+suffix is stripped for you.
 
 ## Commands
 
-### `chat` - Interactive Chat Session
-
-Start an interactive conversation with the agent:
+### `chat` — interactive session
 
 ```bash
 a2a-cli chat
-a2a-cli --server http://localhost:8000 chat
+a2a-cli --server http://localhost:3008 chat
 ```
 
-**In-chat commands:**
-- `/new` - Start a fresh session (clears task and context IDs)
-- `/exit` - Exit the chat session
+The `contextId` is kept across turns, so the agent remembers the conversation.
+The `taskId` is kept **only** while a task is waiting for your input, so your
+next line answers the pending question rather than starting a new task.
 
-**Example session:**
-```
-A2A Terminal Client
-Agent Base URL: http://localhost:41241
-✓ Agent Card Found:
-  Name:        Example Agent
-  Streaming:   Supported
+In-chat commands:
 
-Example Agent > You: Hello, can you help me?
+- `/new` — clear both the task and context ids (fresh conversation)
+- `/exit` — quit
 
-Example Agent [10:23:45]: ⏳ Status: working
-Example Agent [10:23:45]: ✉️ Message:
-  📝 Text: Hello! I'd be happy to help you.
-
-Example Agent > You: /exit
-Exiting A2A Terminal Client. Goodbye!
-```
-
-### `send` - Send a Message
-
-Send a one-off message to the agent:
+Works with piped stdin too (reads lines until EOF):
 
 ```bash
-# Send a message directly
-a2a-cli send "Hello, agent"
-
-# Wait for task completion (streaming mode)
-a2a-cli send "Generate a list of 5 movie recommendations" --wait
-
-# Send from stdin
-a2a-cli send < prompt-file.txt
-cat prompt-file.txt | a2a-cli send
-
-# With custom server
-a2a-cli --server http://localhost:8000 send "What's the time?"
+printf 'What is 2+2?\n/exit\n' | a2a-cli chat
 ```
 
-**Options:**
-- `-w, --wait` - Wait for task completion using streaming mode (default: false)
+### `send` — one-off message
 
-### `get` - Get Task Details
+```bash
+a2a-cli send "Hello, agent"                    # fire and forget, prints the task id
+a2a-cli send "Write a poem" --wait             # stream until done
+a2a-cli send < prompt.txt                      # message from stdin
 
-Retrieve details about a specific task:
+# Continue a conversation, or answer a task parked in input-required
+a2a-cli send "blue" --task <task-id> --context <context-id>
+```
+
+Options:
+
+- `-w, --wait` — stream the task until it completes, fails, or asks a question
+- `-c, --context <id>` — continue an existing conversation (`contextId`)
+- `-t, --task <id>` — answer a task waiting in `input-required` (`taskId`)
+
+### `get` / `cancel`
 
 ```bash
 a2a-cli get <task-id>
-```
-
-**Output includes:**
-- Task ID and Context ID
-- Current status
-- Status messages
-- Artifacts (if any)
-
-### `cancel` - Cancel a Task
-
-Cancel a running task:
-
-```bash
+a2a-cli get <task-id> --history 10
 a2a-cli cancel <task-id>
 ```
 
-## Global Options
+Both print the task id, context id, state name (`COMPLETED`, `CANCELED`, …),
+the status message, and any artifacts.
 
-- `-s, --server <url>` - Agent server URL (default: `http://localhost:41241`)
-- `-V, --version` - Output the version number
-- `-h, --help` - Display help information
+## Interactive tasks (input-required)
 
-## Usage Examples
+When the agent needs you — a question, or a tool permission — the task moves to
+`INPUT_REQUIRED` and the stream ends. The CLI shows it as:
 
-```bash
-# Interactive chat with default server
-a2a-cli chat
-
-# Interactive chat with custom server
-a2a-cli --server http://localhost:8000 chat
-
-# Send a quick message (fire and forget)
-a2a-cli send "What is 2+2?"
-
-# Send and wait for completion
-a2a-cli send "Write me a poem" --wait
-
-# Send from a file
-a2a-cli send < my-prompt.txt
-
-# Get task information
-a2a-cli get task-abc-123
-
-# Cancel a long-running task
-a2a-cli cancel task-abc-123
-
-# Chain commands
-a2a-cli --server http://localhost:8000 send "Generate code" --wait > output.txt
+```
+❓ Which colour do you prefer?
+   - red — The colour red
+   - blue — The colour blue
+   reply with your answer (free text works)
 ```
 
-## Features
+The question comes from the status message's text part, the options from its
+`data` part; a tool permission is shown the same way, with the tool, its input
+and the reason it was asked.
 
-- 🚀 **Multiple command modes**: Interactive chat or one-off messages
-- 📡 **Streaming support**: Real-time agent responses with `--wait` flag
-- 📝 **Task management**: Query and cancel tasks
-- 🎨 **Rich output**: Color-coded status indicators and formatted messages
-- 📄 **Artifact support**: Display files and data returned by agents
-- 🔄 **Context persistence**: Maintains conversation context in chat mode
-- 📥 **Stdin support**: Pipe prompts from files or other commands
+In `chat`, just type your answer on the next line. Outside of it, reply on the
+same task:
+
+```bash
+a2a-cli send "blue" --task <task-id> --context <context-id>
+```
+
+## Reading the stream
+
+The CLI switches on the `metadata.kind` an A2A agent may put on its status
+messages:
+
+| `metadata.kind` | Rendered as |
+|---|---|
+| `tool_use` | a dimmed `⚙ Write` line — progress, not the answer |
+| `result` | the agent's line: `agent: …` |
+| `ask_user_question` / `permission_request` | the `❓` block above |
+| `resumed` | nothing: the resume is announced by the task line |
+| *(absent)* | the agent's line, as before |
+
+A `task` event whose id is the task you are currently answering is a **resume
+snapshot**, printed as `↩ resuming task <id>` instead of a state line. Agents
+that send no metadata still render exactly as they used to.
+
+## Global options
+
+- `-s, --server <url>` — agent base URL (default `http://localhost:3008`)
+- `-V, --version`, `-h, --help`
 
 ## Development
 
 ```bash
-# Run in development mode
-npm run dev chat
-npm run dev send "test message"
-
-# Type checking
+npm run dev chat        # tsx, no build
 npm run typecheck
-
-# Build
-npm run build
+npm run build           # -> dist/cli.js
 ```
-
-## Color Coding
-
-The CLI uses colors for better readability:
-- 🟦 **Blue**: Working/In-progress states
-- 🟩 **Green**: Completed/Success states
-- 🟨 **Yellow**: Warnings/Input required
-- 🔴 **Red**: Errors/Failed states
-- ⚪ **Gray**: Metadata and timestamps
 
 ## License
 

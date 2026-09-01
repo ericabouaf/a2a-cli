@@ -1,160 +1,81 @@
 import readline from "node:readline";
-import { A2AClient } from "@a2a-js/sdk/client";
-import {
-  MessageSendParams,
-  TaskStatusUpdateEvent,
-  TaskArtifactUpdateEvent,
-  Message,
-  Task,
-} from "@a2a-js/sdk";
-import { colorize, printAgentEvent, printMessageContent, generateId } from "../utils/display.js";
+import type { Client } from "@a2a-js/sdk/client";
+import { extractErrorMessage } from "@a2a-js/sdk/errors";
+import { buildUserMessage, colorize } from "../utils/display.js";
+import { renderStream } from "../utils/stream.js";
 
-export async function chatCommand(client: A2AClient, agentName: string) {
-  let currentTaskId: string | undefined = undefined;
-  let currentContextId: string | undefined = undefined;
+/**
+ * Interactive session.
+ *
+ * - `contextId` is kept for the whole conversation (that is what makes the
+ *   agent remember previous turns).
+ * - `taskId` is kept **only** while the current task sits in `input-required`,
+ *   so that the next line answers the pending question instead of starting a
+ *   new task.
+ */
+export async function chatCommand(client: Client, agentName: string) {
+  let taskId = "";
+  let contextId = "";
 
+  const interactive = Boolean(process.stdin.isTTY);
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: colorize("cyan", "You: "),
+    terminal: interactive,
   });
+  const prompt = colorize("cyan", `${agentName} > You: `);
 
-  console.log(colorize("dim", `No active task or context initially. Use '/new' to start a fresh session or send a message.`));
   console.log(
-    colorize("green", `Enter messages, or use '/new' to start a new session. '/exit' to quit.`)
+    colorize("green", "Type a message. '/new' starts a fresh session, '/exit' quits.")
   );
+  if (interactive) process.stdout.write(prompt);
 
-  rl.setPrompt(colorize("cyan", `${agentName} > You: `));
-  rl.prompt();
-
-  rl.on("line", async (line) => {
+  // The async iterator applies backpressure, so a piped stdin is processed one
+  // line at a time instead of firing every line at once.
+  for await (const line of rl) {
     const input = line.trim();
-    rl.setPrompt(colorize("cyan", `${agentName} > You: `));
 
     if (!input) {
-      rl.prompt();
-      return;
+      if (interactive) process.stdout.write(prompt);
+      continue;
     }
+
+    if (input.toLowerCase() === "/exit") break;
 
     if (input.toLowerCase() === "/new") {
-      currentTaskId = undefined;
-      currentContextId = undefined;
-      console.log(
-        colorize("bright", `✨ Starting new session. Task and Context IDs are cleared.`)
-      );
-      rl.prompt();
-      return;
+      taskId = "";
+      contextId = "";
+      console.log(colorize("bright", "✨ New session: task and context ids cleared."));
+      if (interactive) process.stdout.write(prompt);
+      continue;
     }
 
-    if (input.toLowerCase() === "/exit") {
-      rl.close();
-      return;
-    }
-
-    const messageId = generateId();
-
-    const messagePayload: Message = {
-      messageId: messageId,
-      kind: "message",
-      role: "user",
-      parts: [
-        {
-          kind: "text",
-          text: input,
-        },
-      ],
-    };
-
-    if (currentTaskId) {
-      messagePayload.taskId = currentTaskId;
-    }
-    if (currentContextId) {
-      messagePayload.contextId = currentContextId;
-    }
-
-    const params: MessageSendParams = {
-      message: messagePayload,
-    };
+    // Echo the input when stdin is piped, so the transcript stays readable.
+    if (!interactive) console.log(colorize("cyan", `You: ${input}`));
 
     try {
-      console.log(colorize("dim", "Sending message..."));
-      const stream = client.sendMessageStream(params);
-
-      for await (const event of stream) {
-
-        //console.log("DEBUG event", event);
-
-        const timestamp = new Date().toLocaleTimeString();
-        const prefix = colorize("magenta", `\n${agentName} [${timestamp}]:`);
-
-        if (event.kind === "status-update" || event.kind === "artifact-update") {
-          const typedEvent = event as TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
-          printAgentEvent(typedEvent, agentName);
-
-          if (typedEvent.kind === "status-update" && (typedEvent as TaskStatusUpdateEvent).final && (typedEvent as TaskStatusUpdateEvent).status.state !== "input-required") {
-            console.log(colorize("yellow", `   Task ${typedEvent.taskId} is final. Clearing current task ID.`));
-            currentTaskId = undefined;
-          }
-
-        } else if (event.kind === "message") {
-          const msg = event as Message;
-          console.log(`${prefix} ${colorize("green", "✉️ Message Stream Event:")}`);
-          printMessageContent(msg);
-          if (msg.taskId && msg.taskId !== currentTaskId) {
-            console.log(colorize("dim", `   Task ID context updated to ${msg.taskId} based on message event.`));
-            currentTaskId = msg.taskId;
-          }
-          if (msg.contextId && msg.contextId !== currentContextId) {
-            console.log(colorize("dim", `   Context ID updated to ${msg.contextId} based on message event.`));
-            currentContextId = msg.contextId;
-          }
-        } else if (event.kind === "task") {
-          const task = event as Task;
-          console.log(`${prefix} ${colorize("blue", "ℹ️ Task Stream Event:")} ID: ${task.id}, Context: ${task.contextId}, Status: ${task.status.state}`);
-          if (task.id !== currentTaskId) {
-            console.log(colorize("dim", `   Task ID updated from ${currentTaskId || 'N/A'} to ${task.id}`));
-            currentTaskId = task.id;
-          }
-          if (task.contextId && task.contextId !== currentContextId) {
-            console.log(colorize("dim", `   Context ID updated from ${currentContextId || 'N/A'} to ${task.contextId}`));
-            currentContextId = task.contextId;
-          }
-          if (task.status.message) {
-            console.log(colorize("gray", "   Task includes message:"));
-            printMessageContent(task.status.message);
-          }
-          if (task.artifacts && task.artifacts.length > 0) {
-            console.log(colorize("gray", `   Task includes ${task.artifacts.length} artifact(s).`));
-          }
-        } else {
-          console.log(prefix, colorize("yellow", "Received unknown event structure from stream:"), event);
-        }
-      }
-      console.log(colorize("dim", `--- End of response stream for this input ---`));
-    } catch (error: any) {
-      const timestamp = new Date().toLocaleTimeString();
-      const prefix = colorize("red", `\n${agentName} [${timestamp}] ERROR:`);
-      console.error(
-        prefix,
-        `Error communicating with agent:`,
-        error.message || error
+      const outcome = await renderStream(
+        client.sendMessageStream({
+          tenant: "",
+          message: buildUserMessage(input, { taskId, contextId }),
+          configuration: undefined,
+          metadata: undefined,
+        }),
+        agentName,
+        // Non-empty only while answering a parked task: lets the renderer show
+        // the agent's task snapshot as a resume instead of a new task.
+        { answeringTaskId: taskId || undefined }
       );
-      if (error.code) {
-        console.error(colorize("gray", `   Code: ${error.code}`));
-      }
-      if (error.data) {
-        console.error(
-          colorize("gray", `   Data: ${JSON.stringify(error.data)}`)
-        );
-      }
-      if (!(error.code || error.data) && error.stack) {
-        console.error(colorize("gray", error.stack.split('\n').slice(1, 3).join('\n')));
-      }
-    } finally {
-      rl.prompt();
+
+      contextId = outcome.contextId ?? contextId;
+      taskId = outcome.inputRequired && outcome.taskId ? outcome.taskId : "";
+    } catch (error) {
+      console.error(colorize("red", `✗ ${extractErrorMessage(error)}`));
     }
-  }).on("close", () => {
-    console.log(colorize("yellow", "\nExiting A2A Terminal Client. Goodbye!"));
-    process.exit(0);
-  });
+
+    if (interactive) process.stdout.write(prompt);
+  }
+
+  rl.close();
+  console.log(colorize("yellow", "Bye."));
 }
